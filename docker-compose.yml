@@ -3,25 +3,49 @@ version: "3"
 volumes:
   postgres_storage:
   n8n_storage:
+  redis_storage:
+
+x-shared: &shared
+  restart: always
+  links:
+    - redis
+    - postgres
+  volumes:
+    - n8n_storage:/home/node/.n8n
+  environment:
+    - N8N_BASIC_AUTH_ACTIVE=true
+    - N8N_BASIC_AUTH_USER
+    - N8N_BASIC_AUTH_PASSWORD
+    - N8N_PORT=5678
+    - N8N_PROTOCOL=http
+    # - N8N_HOST=localhost
+    - NODE_ENV=dev
+    # - WEBHOOK_URL=http://localhost/
+    - EXECUTIONS_MODE=queue
+    - QUEUE_BULL_REDIS_HOST=redis
+    - GENERIC_TIMEZONE=${GENERIC_TIMEZONE}
+    - POSTGRES_DATABASE=${POSTGRES_DB}
+    - POSTGRES_HOST=postgres
+    - POSTGRES_PASSWORD
+    - POSTGRES_PORT=5432
+    - POSTGRES_USER
+  depends_on:
+    redis:
+      condition: service_healthy
+    postgres:
+      condition: service_healthy
 
 services:
-  traefik:
-    image:  traefik:latest
+  redis:
+    image: redis:alpine
     restart: always
-    ports:
-      - 80:80
-      - 8080:8080
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    networks:
-      - web
-    command:
-      - --api=true
-      - --api.insecure=true
-      - --providers.docker=true
-      - --providers.docker.network=web
-      - --providers.docker.exposedbydefault=false
-      - --entrypoints.web.address=:80
+      - redis_storage:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   postgres:
     image: postgres:latest
@@ -41,54 +65,18 @@ services:
       retries: 10
 
   n8n:
+    <<: *shared
     image: n8nio/n8n:latest
-    restart: always
-    # ports:
-      # - 5678:5678
-    links:
-      - postgres
-    volumes:
-      - n8n_storage:/home/node/.n8n
-    networks:
-      - web
+    ports:
+      - 5678:5678
+    command: /bin/sh -c "n8n start --tunnel"
+
+  n8n-worker:
+    <<: *shared
+    image: n8nio/n8n:latest
     deploy:
       mode: replicated
-      replicas: 3
-    labels:
-      - traefik.enable=true
-      - traefik.http.routers.n8n.rule=Host(`${DOMAIN_NAME}`)
-      - traefik.http.routers.n8n.tls=true
-      - traefik.http.routers.n8n.entrypoints=web
-      - traefik.http.middlewares.n8n.headers.SSLRedirect=true
-      - traefik.http.middlewares.n8n.headers.STSSeconds=315360000
-      - traefik.http.middlewares.n8n.headers.browserXSSFilter=true
-      - traefik.http.middlewares.n8n.headers.contentTypeNosniff=true
-      - traefik.http.middlewares.n8n.headers.forceSTSHeader=true
-      - traefik.http.middlewares.n8n.headers.SSLHost=${DOMAIN_NAME}
-      - traefik.http.middlewares.n8n.headers.STSIncludeSubdomains=true
-      - traefik.http.middlewares.n8n.headers.STSPreload=true
-      - traefik.http.routers.n8n.middlewares=n8n@docker
-    environment:
-      - N8N_BASIC_AUTH_ACTIVE=true
-      - N8N_BASIC_AUTH_USER
-      - N8N_BASIC_AUTH_PASSWORD
-      - N8N_HOST=${DOMAIN_NAME}
-      - N8N_PORT=5678
-      - N8N_PROTOCOL=http
-      - NODE_ENV=production
-      - WEBHOOK_URL=http://${DOMAIN_NAME}/
-      - GENERIC_TIMEZONE=${GENERIC_TIMEZONE}
-      - POSTGRES_DATABASE=${POSTGRES_DB}
-      - POSTGRES_HOST=postgres
-      - POSTGRES_PASSWORD
-      - POSTGRES_PORT=5432
-      - POSTGRES_USER
-    command: /bin/sh -c "n8n start --tunnel"
+      replicas: 5
+    command: /bin/sh -c "sleep 5; n8n worker"
     depends_on:
-      postgres:
-        condition: service_healthy
-
-networks:
-  web:
-    external: true
-
+      - n8n
