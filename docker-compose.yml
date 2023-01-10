@@ -23,6 +23,7 @@ x-shared: &shared
     # - WEBHOOK_URL=http://localhost/
     - EXECUTIONS_MODE=queue
     - QUEUE_BULL_REDIS_HOST=redis
+    - QUEUE_HEALTH_CHECK_ACTIVE=true
     - GENERIC_TIMEZONE=${GENERIC_TIMEZONE}
     - POSTGRES_DATABASE=${POSTGRES_DB}
     - POSTGRES_HOST=postgres
